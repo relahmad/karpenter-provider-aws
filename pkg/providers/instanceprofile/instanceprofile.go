@@ -19,6 +19,8 @@ import (
 	"fmt"
 	"strings"
 
+	"sigs.k8s.io/controller-runtime/pkg/log"
+
 	"github.com/aws/aws-sdk-go-v2/service/iam"
 	iamtypes "github.com/aws/aws-sdk-go-v2/service/iam/types"
 	"github.com/awslabs/operatorpkg/serrors"
@@ -34,6 +36,7 @@ type Provider interface {
 	Get(context.Context, string) (*iamtypes.InstanceProfile, error)
 	Create(context.Context, string, string, map[string]string) error
 	Delete(context.Context, string) error
+	UpdateRole(context.Context, string, string) error
 }
 
 type DefaultProvider struct {
@@ -128,6 +131,41 @@ func (p *DefaultProvider) Delete(ctx context.Context, instanceProfileName string
 	}); err != nil {
 		return awserrors.IgnoreNotFound(serrors.Wrap(fmt.Errorf("deleting instance profile, %w", err), "instance-profile", instanceProfileName))
 	}
+	p.cache.Delete(instanceProfileName)
+	return nil
+}
+
+func (p *DefaultProvider) UpdateRole(ctx context.Context, instanceProfileName string, roleName string) error {
+	instanceProfile, err := p.Get(ctx, instanceProfileName)
+	if err != nil {
+		return fmt.Errorf("getting instance profile, %w", err)
+	}
+
+	log.FromContext(ctx).Info("found instance profile",
+		"profileName", instanceProfileName,
+		"currentRole", lo.Ternary(len(instanceProfile.Roles) > 0, *instanceProfile.Roles[0].RoleName, "no role"))
+
+	if len(instanceProfile.Roles) == 1 {
+		//log.FromContext(ctx).Info("LOOK HERE FOR FOUND ROLE", "role", *instanceProfile.Roles[0].RoleName)
+		if _, err = p.iamapi.RemoveRoleFromInstanceProfile(ctx, &iam.RemoveRoleFromInstanceProfileInput{
+			InstanceProfileName: lo.ToPtr(instanceProfileName),
+			RoleName:            instanceProfile.Roles[0].RoleName,
+		}); err != nil && !awserrors.IsNotFound(err) {
+			return fmt.Errorf("removing role from instance profile, %w", err)
+		}
+
+	}
+
+	roleName = lo.LastOr(strings.Split(roleName, "/"), roleName)
+	// Add new role
+	if _, err := p.iamapi.AddRoleToInstanceProfile(ctx, &iam.AddRoleToInstanceProfileInput{
+		InstanceProfileName: lo.ToPtr(instanceProfileName),
+		RoleName:            lo.ToPtr(roleName),
+	}); err != nil {
+		return fmt.Errorf("adding role to instance profile, %w", err)
+	}
+
+	// Invalidate cache since we modified the profile
 	p.cache.Delete(instanceProfileName)
 	return nil
 }
