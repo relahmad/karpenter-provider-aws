@@ -22,6 +22,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
 	v1 "github.com/aws/karpenter-provider-aws/pkg/apis/v1"
+	awserrors "github.com/aws/karpenter-provider-aws/pkg/errors"
 	"github.com/aws/karpenter-provider-aws/pkg/operator/options"
 	"github.com/aws/karpenter-provider-aws/pkg/providers/instanceprofile"
 )
@@ -41,13 +42,33 @@ func NewInstanceProfileReconciler(instanceProfileProvider instanceprofile.Provid
 func (ip *InstanceProfile) Reconcile(ctx context.Context, nodeClass *v1.EC2NodeClass) (reconcile.Result, error) {
 	if nodeClass.Spec.Role != "" {
 		profileName := nodeClass.InstanceProfileName(options.FromContext(ctx).ClusterName, ip.region)
-		if err := ip.instanceProfileProvider.Create(
-			ctx,
-			profileName,
-			nodeClass.InstanceProfileRole(),
-			nodeClass.InstanceProfileTags(options.FromContext(ctx).ClusterName, ip.region),
-		); err != nil {
-			return reconcile.Result{}, fmt.Errorf("creating instance profile, %w", err)
+
+		// Try to get existing profile
+		existingProfile, err := ip.instanceProfileProvider.Get(ctx, profileName)
+		if err != nil {
+			if !awserrors.IsNotFound(err) {
+				return reconcile.Result{}, fmt.Errorf("getting instance profile, %w", err)
+			}
+
+			if err := ip.instanceProfileProvider.Create(
+				ctx,
+				profileName,
+				nodeClass.InstanceProfileRole(),
+				nodeClass.InstanceProfileTags(options.FromContext(ctx).ClusterName, ip.region),
+			); err != nil {
+				return reconcile.Result{}, fmt.Errorf("creating instance profile, %w", err)
+			}
+		} else {
+			// Only update if role is different
+			if len(existingProfile.Roles) != 1 || *existingProfile.Roles[0].RoleName != nodeClass.Spec.Role {
+				if err := ip.instanceProfileProvider.UpdateRole(
+					ctx,
+					profileName,
+					nodeClass.Spec.Role,
+				); err != nil {
+					return reconcile.Result{}, fmt.Errorf("updating instance profile, %w", err)
+				}
+			}
 		}
 		nodeClass.Status.InstanceProfile = profileName
 	} else {
