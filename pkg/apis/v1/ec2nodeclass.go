@@ -83,9 +83,8 @@ type EC2NodeClassSpec struct {
 	// This field may be made mutable in the future, assuming the correct garbage collection and drift handling is implemented
 	// for the old instance profiles on an update.
 	// +kubebuilder:validation:XValidation:rule="self != ''",message="role cannot be empty"
-	// +kubebuilder:validation:XValidation:rule="self == oldSelf",message="immutable field changed"
 	// +optional
-	Role string `json:"role,omitempty"`
+	Role string `json:"role,omitempty" hash:"ignore"`
 	// InstanceProfile is the AWS entity that instances use.
 	// This field is mutually exclusive from role.
 	// The instance profile should already have a role assigned to it that Karpenter
