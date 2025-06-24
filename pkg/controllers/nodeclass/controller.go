@@ -99,7 +99,7 @@ func NewController(
 			NewCapacityReservationReconciler(clk, capacityReservationProvider),
 			NewSubnetReconciler(subnetProvider),
 			NewSecurityGroupReconciler(securityGroupProvider),
-			NewInstanceProfileReconciler(instanceProfileProvider, region),
+			NewInstanceProfileReconciler(instanceProfileProvider, region, ec2api),
 			validation,
 			NewReadinessReconciler(launchTemplateProvider),
 		},

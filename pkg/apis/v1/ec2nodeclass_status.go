@@ -160,6 +160,15 @@ type EC2NodeClassStatus struct {
 	// Conditions contains signals for health and readiness
 	// +optional
 	Conditions []status.Condition `json:"conditions,omitempty"`
+
+	// +optional
+	InstanceProfiles *InstanceProfilesStatus `json:"instanceProfiles,omitempty"`
+}
+
+type InstanceProfilesStatus struct {
+	Current  string   `json:"current"`
+	Previous []string `json:"previous"`
+	Version  int      `json:"version"`
 }
 
 func (in *EC2NodeClass) StatusConditions() status.ConditionSet {
