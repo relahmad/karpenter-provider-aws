@@ -22,14 +22,11 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 	"sigs.k8s.io/karpenter/pkg/controllers/provisioning"
 
-	"github.com/aws/aws-sdk-go-v2/aws"
-	"github.com/aws/aws-sdk-go-v2/service/ec2"
-	ec2types "github.com/aws/aws-sdk-go-v2/service/ec2/types"
-
 	v1 "github.com/aws/karpenter-provider-aws/pkg/apis/v1"
 	sdk "github.com/aws/karpenter-provider-aws/pkg/aws"
 	"github.com/aws/karpenter-provider-aws/pkg/operator/options"
 	"github.com/aws/karpenter-provider-aws/pkg/providers/instanceprofile"
+	"sigs.k8s.io/karpenter/pkg/controllers/state"
 )
 
 type InstanceProfile struct {
@@ -37,13 +34,16 @@ type InstanceProfile struct {
 	region                  string
 	ec2api                  sdk.EC2API
 	provisioner             *provisioning.Provisioner
+	cluster                 *state.Cluster
 }
 
-func NewInstanceProfileReconciler(instanceProfileProvider instanceprofile.Provider, region string, ec2api sdk.EC2API) *InstanceProfile {
+func NewInstanceProfileReconciler(instanceProfileProvider instanceprofile.Provider, region string, ec2api sdk.EC2API, provisioner *provisioning.Provisioner, cluster *state.Cluster) *InstanceProfile {
 	return &InstanceProfile{
 		instanceProfileProvider: instanceProfileProvider,
 		region:                  region,
 		ec2api:                  ec2api,
+		provisioner:             provisioner,
+		cluster:                 cluster,
 	}
 }
 
@@ -52,14 +52,16 @@ func (ip *InstanceProfile) Reconcile(ctx context.Context, nodeClass *v1.EC2NodeC
 		// Initialize status if needed
 		if nodeClass.Status.InstanceProfiles == nil {
 			nodeClass.Status.InstanceProfiles = &v1.InstanceProfilesStatus{
-				Current:  "",
+				//Current:  "",
 				Previous: []string{},
 				Version:  0,
 			}
 		}
+
+		// By default, the nodeClass.Status.InstanceProfile should be ""
 		var currentRole string
-		if nodeClass.Status.InstanceProfiles.Current != "" {
-			if profile, err := ip.instanceProfileProvider.Get(ctx, nodeClass.Status.InstanceProfiles.Current); err == nil {
+		if nodeClass.Status.InstanceProfile != "" {
+			if profile, err := ip.instanceProfileProvider.Get(ctx, nodeClass.Status.InstanceProfile); err == nil {
 				if len(profile.Roles) > 0 {
 					currentRole = lo.FromPtr(profile.Roles[0].RoleName)
 				}
@@ -77,12 +79,17 @@ func (ip *InstanceProfile) Reconcile(ctx context.Context, nodeClass *v1.EC2NodeC
 			); err != nil {
 				return reconcile.Result{}, fmt.Errorf("creating instance profile, %w", err)
 			}
+
+			if nodeClass.Status.InstanceProfile != "" {
+				nodeClass.Status.InstanceProfiles.Previous = append(nodeClass.Status.InstanceProfiles.Previous, nodeClass.Status.InstanceProfile)
+			}
 			nodeClass.Status.InstanceProfile = profileName
 
-			if nodeClass.Status.InstanceProfiles.Current != "" {
-				nodeClass.Status.InstanceProfiles.Previous = append(nodeClass.Status.InstanceProfiles.Previous, nodeClass.Status.InstanceProfiles.Current)
-			}
-			nodeClass.Status.InstanceProfiles.Current = profileName
+			// if nodeClass.Status.InstanceProfiles.Current != "" {
+			// 	nodeClass.Status.InstanceProfiles.Previous = append(nodeClass.Status.InstanceProfiles.Previous, nodeClass.Status.InstanceProfiles.Current)
+			// }
+			//nodeClass.Status.InstanceProfiles.Previous = append(nodeClass.Status.InstanceProfiles.Previous, nodeClass.Status.InstanceProfiles.Current)
+			//nodeClass.Status.InstanceProfiles.Current = profileName
 			//nodeClass.Status.InstanceProfiles.Version++
 		}
 		// Run garbage collection on every reconciliation
@@ -98,39 +105,46 @@ func (ip *InstanceProfile) Reconcile(ctx context.Context, nodeClass *v1.EC2NodeC
 }
 
 func (ip *InstanceProfile) garbageCollectProfiles(ctx context.Context, nodeClass *v1.EC2NodeClass) error {
+	// dont think it is possible for InstanceProfiles to be nil
 	if nodeClass.Status.InstanceProfiles == nil || len(nodeClass.Status.InstanceProfiles.Previous) == 0 {
 		return nil
 	}
 
 	//ip.provisioner.cluster.Synced()??
-
+	//ip.provisioner.cluster
+	//ip.cluster.Synced(ctx) -- this one
 	// Loops through previous profiles from newest to oldest
 	for i := len(nodeClass.Status.InstanceProfiles.Previous) - 1; i >= 0; i-- {
 		oldProfile := nodeClass.Status.InstanceProfiles.Previous[i]
+		
+		nodeClaims = 
+		if ip.cluster.Synced(ctx) == true && {
 
-		// Checks if any instances are using this profile
-		instances, err := ip.ec2api.DescribeInstances(ctx, &ec2.DescribeInstancesInput{
-			Filters: []ec2types.Filter{
-				{
-					Name:   aws.String("iam-instance-profile.arn"),
-					Values: []string{fmt.Sprintf("*/%s", oldProfile)}, // matches any ARN that ends with profile name
-				},
-			},
-		})
-		if err != nil {
-			return fmt.Errorf("checking instances using profile %s: %w", oldProfile, err)
 		}
 
-		// If no instances using this profile, delete profile
-		if len(instances.Reservations) == 0 {
-			if err := ip.instanceProfileProvider.Delete(ctx, oldProfile); err != nil {
-				return fmt.Errorf("deleting instance profile %s: %w", oldProfile, err)
-			}
-			nodeClass.Status.InstanceProfiles.Previous = append(
-				nodeClass.Status.InstanceProfiles.Previous[:i],
-				nodeClass.Status.InstanceProfiles.Previous[i+1:]...,
-			)
-		}
+		// // Checks if any instances are using this profile
+		// instances, err := ip.ec2api.DescribeInstances(ctx, &ec2.DescribeInstancesInput{
+		// 	Filters: []ec2types.Filter{
+		// 		{
+		// 			Name:   aws.String("iam-instance-profile.arn"),
+		// 			Values: []string{fmt.Sprintf("*/%s", oldProfile)}, // matches any ARN that ends with profile name
+		// 		},
+		// 	},
+		// })
+		// if err != nil {
+		// 	return fmt.Errorf("checking instances using profile %s: %w", oldProfile, err)
+		// }
+
+		// // If no instances using this profile, delete profile
+		// if len(instances.Reservations) == 0 {
+		// 	if err := ip.instanceProfileProvider.Delete(ctx, oldProfile); err != nil {
+		// 		return fmt.Errorf("deleting instance profile %s: %w", oldProfile, err)
+		// 	}
+		// 	nodeClass.Status.InstanceProfiles.Previous = append(
+		// 		nodeClass.Status.InstanceProfiles.Previous[:i],
+		// 		nodeClass.Status.InstanceProfiles.Previous[i+1:]...,
+		// 	)
+		// }
 
 	}
 	return nil

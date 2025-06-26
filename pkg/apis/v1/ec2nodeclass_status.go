@@ -166,7 +166,7 @@ type EC2NodeClassStatus struct {
 }
 
 type InstanceProfilesStatus struct {
-	Current  string   `json:"current"`
+	//Current  string   `json:"current"`
 	Previous []string `json:"previous"`
 	Version  int      `json:"version"`
 }
